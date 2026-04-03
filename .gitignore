@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 训练产物
+checkpoints/
+outputs/
+*.pt
+*.pth
+*.ckpt
+
+# TensorBoard
+runs/
+
+# 音频文件（一般很大，不上传）
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+
+# 缓存
+.cache/
+.huggingface/
+datasets/
+
+# 模型文件（太大，不上传）
+models/
+.Qwen3tts/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件（Windows）
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# uv
+uv.lock

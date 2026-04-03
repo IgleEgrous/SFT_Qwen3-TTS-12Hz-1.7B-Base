@@ -4,4 +4,30 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "torch>=2.1.0",
+    "torchvision",           # 建议带上，有些音频特征提取会用到图像相关的库
+    "torchaudio>=2.1.0",     # 强烈建议补充！处理音频张量的官方库
+    "transformers>=4.38.0",
+    "accelerate",
+    "peft",                  # LoRA 微调
+    "trl",                   # SFT 训练器
+    "bitsandbytes",          # 4060 显存优化 (4-bit/8-bit)
+    "datasets",              # 数据集加载
+    "librosa",               # 基础音频处理
+    "scipy>=1.10.0",         # 信号处理
+    "soundfile",             # 音频读写
+    "phonemizer-fork",       # 音素化
+    "sentencepiece",         # 分词器依赖
+    "einops",                # 张量变换
+    "tensorboard",           # 训练可视化
+    "matplotlib",            # 频谱可视化调试
+    "numpy>=1.24.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+dev-dependencies = []
