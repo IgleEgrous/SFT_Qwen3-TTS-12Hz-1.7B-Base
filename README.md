@@ -35,7 +35,6 @@ Step 1: Tokenize 数据
 Step 2: LoRA SFT 训练
 Step 3: 横向对比各 epoch 效果（选最优 checkpoint）
 Step 4: 批量合并所有 LoRA checkpoint → 完整 HF 模型
-Step 5: 上传至 HuggingFace
 ```
 
 ## 数据集
@@ -232,29 +231,6 @@ output/merged_models/
 ```
 
 每个目录都是完整的 HF 模型，`from_pretrained` 直接加载。
-
----
-
-## Step 5: 上传至 HuggingFace
-
-```bash
-# 安装 huggingface_hub（如未安装）
-pip install huggingface_hub
-
-# 登录（需要 HF_TOKEN）
-huggingface-cli login
-
-# 上传单个模型
-huggingface-cli upload \
-  yeeko/Qwen3-TTS-12Hz-1.7B-Base-elaina-e8 \
-  ../output/merged_models/checkpoint-epoch-8-merged
-
-# 或上传整个 merged_models 目录
-huggingface-cli upload \
-  yeeko/Qwen3-TTS-12Hz-1.7B-Base-elaina \
-  ../output/merged_models \
-  --include "checkpoint-epoch-*-merged/*"
-```
 
 ---
 
