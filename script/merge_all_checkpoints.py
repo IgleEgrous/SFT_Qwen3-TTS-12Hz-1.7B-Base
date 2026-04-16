@@ -6,9 +6,10 @@ merge_all_checkpoints.py — 批量合并 LoRA checkpoint 到 Base 模型
 输出为独立的完整 HF 模型，可直接上传。
 
 前提：checkpoint 目录包含以下文件（由 sft_12hz_lora.py 生成）：
-    adapter_model.safetensors   # LoRA 权重（A、B 矩阵）
-    adapter_config.json         # PEFT adapter 配置
-    model.safetensors           # Base 模型权重 + speaker embedding 在 slot 3000
+    adapter_model.safetensors           # LoRA 权重（A、B 矩阵）
+    adapter_config.json                 # PEFT adapter 配置
+    trained_speaker_embedding.npy       # 训练好的 speaker embedding（slot spk_id）
+    config.json                          # 含 spk_id 映射
 
 用法：
     python script/merge_all_checkpoints.py \
@@ -31,12 +32,15 @@ import os
 import shutil
 
 import torch
+import numpy as np
 from peft import PeftModel
 from safetensors.torch import load_file, save_file
 
 
-def find_checkpoints(checkpoints_dir: str):
-    """找到所有 checkpoint-epoch-* 目录（需包含 adapter_model.safetensors）"""
+def find_checkpoints(checkpoints_dir: str, epochs: list = None):
+    """找到所有 checkpoint-epoch-* 目录（需包含 adapter_model.safetensors）
+    若指定 epochs，则只返回匹配的那些 epoch。
+    """
     checkpoints = []
     for name in os.listdir(checkpoints_dir):
         path = os.path.join(checkpoints_dir, name)
@@ -46,7 +50,8 @@ def find_checkpoints(checkpoints_dir: str):
                 epoch = int(name.replace("checkpoint-epoch-", ""))
             except ValueError:
                 continue
-            checkpoints.append((epoch, name, path))
+            if epochs is None or epoch in epochs:
+                checkpoints.append((epoch, name, path))
     checkpoints.sort(key=lambda x: x[0])
     return [(name, path) for _, name, path in checkpoints]
 
@@ -65,29 +70,34 @@ def merge_single_checkpoint(base_model_path: str, checkpoint_path: str, output_d
     print(f"合并: {checkpoint_path}")
     print(f"输出: {output_dir}")
 
+    # 从 checkpoint config 中读取 spk_id
+    checkpoint_config_path = os.path.join(checkpoint_path, "config.json")
+    with open(checkpoint_config_path, "r", encoding="utf-8") as f:
+        ckpt_config = json.load(f)
+    spk_id_map = ckpt_config.get("talker_config", {}).get("spk_id", {})
+    if spk_id_map:
+        train_spk_id = list(spk_id_map.values())[0]  # 训练时使用的 slot id
+    else:
+        train_spk_id = 3000
+
     # 1. 加载 base 模型（完整权重）
     print("  [1/4] 加载 Base 模型...")
     from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
     base_model = Qwen3TTSModel.from_pretrained(
         base_model_path,
         torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
     )
 
-    # 2. 注入 speaker embedding（从 checkpoint 的 model.safetensors 读取 slot 3000）
-    checkpoint_model_path = os.path.join(checkpoint_path, "model.safetensors")
-    if os.path.exists(checkpoint_model_path):
-        print("  [2/4] 注入 speaker embedding 到 slot 3000...")
-        ckpt_state = load_file(checkpoint_model_path, device="cpu")
-        spk_embedding = ckpt_state.get("talker.model.codec_embedding.weight")
-        if spk_embedding is not None:
-            with torch.no_grad():
-                base_model.model.talker.model.codec_embedding.weight[3000] = spk_embedding[3000].clone()
-            print(f"       speaker embedding 已注入（来自 model.safetensors slot 3000）")
-        else:
-            print("       ⚠️  未在 checkpoint 中找到 speaker embedding，跳过注入")
+    # 2. 注入训练好的 speaker embedding（从 trained_speaker_embedding.npy 读取）
+    spk_emb_path = os.path.join(checkpoint_path, "trained_speaker_embedding.npy")
+    if os.path.exists(spk_emb_path):
+        print("  [2/4] 注入训练好的 speaker embedding...")
+        trained_emb = torch.from_numpy(np.load(spk_emb_path)).float()
+        with torch.no_grad():
+            base_model.model.talker.model.codec_embedding.weight[train_spk_id] = trained_emb.clone()
+        print(f"       speaker embedding 已注入到 slot {train_spk_id}（来自 trained_speaker_embedding.npy）")
     else:
-        print("       ⚠️  checkpoint 中无 model.safetensors，跳过 speaker 注入")
+        print(f"  ⚠️  未找到 trained_speaker_embedding.npy，跳过 speaker embedding 注入")
 
     # 3. 加载 LoRA adapter 并 merge
     print("  [3/4] 加载 LoRA adapter 并合并...")
@@ -115,7 +125,7 @@ def merge_single_checkpoint(base_model_path: str, checkpoint_path: str, output_d
             shutil.copy2(src, dst)
 
     # 保存合并后的权重（覆盖 model.safetensors）
-    state_dict = {k: v.cpu() for k, v in base_model.state_dict().items()}
+    state_dict = {k: v.cpu() for k, v in base_model.model.state_dict().items()}
 
     # 删除 speaker_encoder（frozen，不参与推理）
     keys_to_drop = [k for k in state_dict.keys() if k.startswith("speaker_encoder.")]
@@ -131,7 +141,7 @@ def merge_single_checkpoint(base_model_path: str, checkpoint_path: str, output_d
     config["tts_model_type"] = "custom_voice"
     config["_name_or_path"] = output_dir
     talker_config = config.get("talker_config", {})
-    talker_config["spk_id"] = {speaker_name: 3000}
+    talker_config["spk_id"] = {speaker_name: train_spk_id}
     talker_config["spk_is_dialect"] = {speaker_name: False}
     config["talker_config"] = talker_config
     with open(config_path, "w", encoding="utf-8") as f:
@@ -147,21 +157,39 @@ def merge_single_checkpoint(base_model_path: str, checkpoint_path: str, output_d
 def main():
     parser = argparse.ArgumentParser(description="批量合并 LoRA checkpoints 到 Base 模型")
     parser.add_argument("--base_model", type=str,
-                        default="../models/Qwen3-TTS-12Hz-1.7B-Base",
+                        default="models/Qwen3-TTS-12Hz-1.7B-Base",
                         help="Base 模型路径")
     parser.add_argument("--checkpoints_dir", type=str,
-                        default="../outputs",
+                        default="outputs",
                         help="checkpoint-epoch-* 所在目录")
     parser.add_argument("--output_parent", type=str,
-                        default="../outputs/merged_models",
+                        default="./outputs/merged_models",
                         help="合并模型输出父目录")
     parser.add_argument("--speaker_name", type=str, default="elaina",
                         help="说话人名称（更新 config.json 用）")
     parser.add_argument("--suffix", type=str, default="-merged",
                         help="输出目录后缀，如 checkpoint-epoch-2-merged")
+    parser.add_argument("--epochs", type=int, nargs="+", default=None,
+                        help="指定合并哪些 epoch，如 --epochs 2 4 8 16 32。默认 None 表示全部")
     args = parser.parse_args()
 
-    checkpoints = find_checkpoints(args.checkpoints_dir)
+    # 统一转绝对路径，避免相对路径被 HuggingFace Hub 当成 repo_id 处理
+    # 相对于脚本文件位置解析，不依赖 cwd
+    import pathlib
+    script_path = pathlib.Path(__file__).resolve()
+    project_root = script_path.parent.parent
+
+    def resolve_path(path):
+        p = pathlib.Path(path)
+        if p.is_absolute():
+            return str(p)
+        return str((project_root / p).resolve())
+
+    args.base_model = resolve_path(args.base_model)
+    args.checkpoints_dir = resolve_path(args.checkpoints_dir)
+    args.output_parent = resolve_path(args.output_parent)
+
+    checkpoints = find_checkpoints(args.checkpoints_dir, epochs=args.epochs)
     if not checkpoints:
         print(f"❌ 未找到任何包含 adapter_model.safetensors 的 checkpoint:")
         print(f"   目录: {args.checkpoints_dir}")

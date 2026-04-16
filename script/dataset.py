@@ -102,6 +102,10 @@ class TTSDataset(Dataset):
     
     @torch.inference_mode()
     def extract_mels(self, audio, sr):
+        if sr != 24000:
+            import librosa
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=24000)
+            sr = 24000
         assert sr == 24000, "Only support 24kHz audio"
         mels = mel_spectrogram(
             torch.from_numpy(audio).unsqueeze(0), 

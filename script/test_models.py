@@ -18,7 +18,7 @@ model = Qwen3TTSModel.from_pretrained(
     dtype=torch.bfloat16,
 )
 
-ref_audio = "D:/Productivity/GPT-SoVITS/voice_sample/结束乐队/语音6月18日视频1.0版本/后藤独音频+日文/houtengdu(3).wav"
+ref_audio = "./datasets/audio/datasets--yeeko--Elaina_WanderingWitch_audio_JA/snapshots/4d1dfd8b112bbb084073c4825f3fc8aa602c1368/train/vocal_广播剧魔女之旅 DRAMA CD p01 Volumen 8 Capítulo 1 BV1yP4y1h7Bz_p1.wav_10.wav_0047253440_0047434560.wav"
 ref_text = "学校行くのは嫌だけど 私みたいな人間は一日行かなかっただけで クラスの皆から存在を忘れられてしまうんだよ"
 
 # voice clone
